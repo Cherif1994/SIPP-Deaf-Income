@@ -31,8 +31,11 @@ pu <- fread(unzipped, sep = "|", select = c(
   
   #Common demographics variables, including age at time of interview (TAGE)
   #	and monthly age during the reference period (TAGE_EHC)
-  'ESEX','TAGE','TAGE_EHC','ERACE','EORIGIN','EEDUC','EHEARING',
+  'ESEX','TAGE','TAGE_EHC','ERACE','TRACE','EHISPAN','EORIGIN','EEDUC','EHEARING',
   
+  #Disabilities
+  'EAMBULAT','ECOGNIT','EDIF10','EERRANDS','EFINDJOB','EGRASPD',
+  'ESEEING','ESELFCARE','ESITD',
   #Example additional variables for analysis
   'TPEARN','TMWKHRS','TJB1_OCC','TJB2_OCC',
   'TJB3_OCC','TJB4_OCC','TJB5_OCC','TJB6_OCC',
@@ -405,6 +408,98 @@ cleaned_pu%>%
   mutate(EHEARING = ifelse(EHEARING == 1, 'deaf','hearing'),
          inhealthjob = ifelse(inhealthjob == 1, 'health worker','any'))%>%
   pivot_wider(names_from = c('EHEARING','inhealthjob'), values_from = n)%>%View()
+
+
+# Critique on colleague's work--------------------------------------------------
+demographics<-select(pu,identifier,MONTHCODE,TAGE,TRACE,EORIGIN,ECOGNIT,EAMBULAT,
+       ECOGNIT,EDIF10,EERRANDS,EFINDJOB,EGRASPD,ESEEING,ESELFCARE,
+       ESITD,EHEARING,inhealthjob,EEDUC,ESEX)
+
+is_mutable<-function(x){
+  myvar<-sym(x)
+  result<-demographics%>%
+    group_by(identifier)%>%
+    summarise(n = length(unique(!!myvar)))%>%
+    filter(n > 1)
+  if(dim(result)[1] > 1){
+    return(paste0(x,': True'))
+  }else{
+    return(paste0(x,': False'))
+  }
+}
+
+for(i in c('TAGE','TRACE','EORIGIN','ECOGNIT','EAMBULAT',
+           'ECOGNIT','EDIF10','EERRANDS','EFINDJOB','EGRASPD',
+           'ESEEING','ESELFCARE','ESITD','EHEARING','inhealthjob',
+           'EEDUC','ESEX')){
+  print(is_mutable(i))
+}
+
+# Make inhealthjob time-invariant for sample description
+everchange<-demographics%>%
+  group_by(identifier)%>%
+  summarise(n = length(unique(inhealthjob)))%>%
+  filter(n > 1)
+
+demographics[demographics$identifier %in% everchange$identifier]$inhealthjob <- 1
+
+demographics<-demographics%>% # Turn cross-sectional
+  filter(MONTHCODE == 1)
+
+# Age Mean, SD
+demographics%>%
+  group_by(EHEARING)%>%
+  summarise(mean = mean(TAGE),sd = sd(TAGE))
+
+# ESEX
+sample_size<-function(x){
+  result<-demographics%>%
+    group_by(EHEARING, !!sym(x))%>%
+    summarise(n = n())%>%
+    na.omit()%>%
+    return()
+  
+  result<-result%>%
+    group_by(EHEARING)%>%
+    summarise(N = sum(n))%>%
+    left_join(result, by = 'EHEARING')%>%
+    mutate(percentage = paste0(round(n/N*100,2),'%'))%>%
+    select(EHEARING,!!sym(x),n,percentage)
+  
+  return(result)
+}
+
+sample_size('ESEX')
+
+# RACETH
+demographics<-demographics%>%
+  mutate(RACETH = ifelse(EORIGIN == 1,'Latinx',
+                  ifelse(TRACE == 1, 'White',
+                  ifelse(TRACE == 2, 'Black',
+                  ifelse(TRACE == 3, 'Native American',
+                  ifelse(TRACE %in% c(4,5),'Asian','multiracial'))))))
+
+sample_size('RACETH')
+
+# Disability
+demographics<-demographics%>%
+  mutate(disability = ifelse((ECOGNIT == 1|EAMBULAT==1|EDIF10==1|EERRANDS==1|EFINDJOB==1|EGRASPD==1|ESELFCARE==1|ESITD==1)&(ESEEING==2),'Other',
+                      ifelse(ESEEING==1,'Blind','No disability')))
+
+sample_size('disability') # Note: this colleague accounts for more disability categories than mine
+
+# Health worker
+sample_size('inhealthjob')
+
+# Education level
+demographics<-demographics%>%
+  mutate(education = ifelse(EEDUC < 9, 'No HS',
+                     ifelse(EEDUC < 10, 'HS diploma',
+                     ifelse(EEDUC < 12, 'Some college',
+                     ifelse(EEDUC == 12, 'Associate',
+                     ifelse(EEDUC < 14, 'Bachelor', 'At least Master'))))))
+
+sample_size('education')
 
 
 # Econometric analysis----------------------------------------------------------
